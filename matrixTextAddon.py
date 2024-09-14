@@ -11,302 +11,225 @@ bl_info = {
 
 import bpy
 import random
-
+from bpy.app.handlers import persistent
 
 updated = False
 
-mydata = None
+# util functions
+def generate_default_charset():
+    chars = []
 
-
-txtObjs = []
-originalTxt = []
-randOffset = []
-
-def updataData() :
-    global updated
-    global txtObjs
-    global originalTxt
-    global randOffset 
-    #objtext = mydata.TMatrixAddon.add()
-    #txttemp = mydata.txt.add()
-    #offtemp = mydata.offset.add()
+    # Initialize characters for matrix effect
     
-    for i in range(0, len(bpy.context.scene.matrixAddonData)):
-        txtObjs.append(bpy.data.objects.get(bpy.context.scene.matrixAddonData[i].TMatrixAddon))
-        originalTxt.append(bpy.context.scene.matrixAddonData[i].txt)
-        randOffset.append(bpy.context.scene.matrixAddonData[i].offset)
+    # katakana characters
+    chars += [chr(i) for i in range(12448, 12543)]
+    # numbers
+    chars += [str(i) for i in range(0, 9)]
+    # spaces, 30 for probabilistic reasons
+    chars += [" "] * 30
+    # capital letters
+    chars += [chr(i) for i in range(65, 90)]
     
-    updated = True
+    return ''.join(chars)
 
+@persistent
+def updateFrame(scene, *args, **kwargs):
+        objs = [o for o in scene.objects if hasattr(o, 'matrixAddonConfig') and hasattr(o, 'matrixAddonData') ]
 
+        random.seed(scene.frame_current)
+        
+        for obj in objs:
+            if obj.matrixAddonConfig.animated and scene.frame_current % int(obj.matrixAddonConfig.every_frame) == int(float(obj.matrixAddonData.offset) * float(obj.matrixAddonConfig.every_frame)):
+                
+                freq = int(100 - obj.matrixAddonConfig.change_freq)
+                chars = list(obj.matrixAddonConfig.charset)
+                currentText = ""
+                changeIndex = random.randint(0, freq)
+
+                for c in range(0, len(obj.matrixAddonData.txt)):
+                    if c >= changeIndex:
+                        if obj.matrixAddonData.txt[c] != '\n' and obj.matrixAddonData.txt[c] != " ":
+                            temp = chars[random.randint(0, len(chars) - 1)]
+                            while temp == " ":
+                                temp = chars[random.randint(0, len(chars) - 1)]
+                            currentText += temp
+                        else:
+                            currentText += obj.matrixAddonData.txt[c]
+                        changeIndex = random.randint(0, freq) + c
+                    else:
+                        currentText += obj.matrixAddonData.txt[c]
+
+                obj.data.body = currentText
+
+# Data classes
 class MatrixAddonDataBlock(bpy.types.PropertyGroup):
-    # annotation
-    TMatrixAddon : bpy.props.StringProperty()
-    txt : bpy.props.StringProperty()
-    offset : bpy.props.FloatProperty()
-    
+    TMatrixAddon: bpy.props.StringProperty() # type: ignore
+    txt: bpy.props.StringProperty() # type: ignore
+    offset: bpy.props.FloatProperty() # type: ignore
+    charset: bpy.props.StringProperty() # type: ignore
+
+
 class MatrixAddonConfig(bpy.types.PropertyGroup):
-    amount : bpy.props.IntProperty \
-      (
-        name = "line width",
-        description = "My description",
-        default = 3,
-        min = 0
-      )
-    characterCount : bpy.props.IntProperty \
-      (
-        name = "Line Count",
-        description = "My description",
-        default = 100, 
-        min = 0
-      )
-    everyframe : bpy.props.IntProperty \
-      (
-        name = "Animate every",
-        description = "animate every x frames",
-        default = 24,
-        min = 0
-      )
-    changeFreq : bpy.props.FloatProperty \
-      (
-        name = "Changing frequency",
-        description = "how much characters to change during ",
-        default = 75,
-        min = 0.0,
-        max = 100.0, 
-        precision = 0
-      )
-    
+    amount: bpy.props.IntProperty(
+        name="Line Width",
+        description="The width of each line of matrix text",
+        default=3,
+        min=0
+    ) # type: ignore
+    char_count: bpy.props.IntProperty(
+        name="Line Count",
+        description="The number of lines in the text",
+        default=100,
+        min=0
+    ) # type: ignore
+    every_frame: bpy.props.IntProperty(
+        name="Animate Every",
+        description="Animate every x frames",
+        default=24,
+        min=0
+    ) # type: ignore
+    change_freq: bpy.props.FloatProperty(
+        name="Changing Frequency",
+        description="How frequently characters change (percentage)",
+        default=75,
+        min=0.0,
+        max=100.0,
+        precision=0
+    ) # type: ignore
+    animated : bpy.props.BoolProperty(default=False, name="Animated") # type: ignore
+    use_custom_charset : bpy.props.BoolProperty(default=False, name="Use Custom charset") # type: ignore
+    charset : bpy.props.StringProperty(default=generate_default_charset()) # type: ignore
 
-
+# Operator to generate matrix text
 class MATRIX_OT_GENERATE(bpy.types.Operator):
-    bl_label = "Generate matrix text"
+    bl_label = "Generate Matrix Text"
     bl_idname = "matrix_addon.generate"
     
-    chars = []
-    
-    for i in range (12448, 12543): #katana japanese characters
-        chars += chr(i)
-    
-    for i in range (0, 9): #numbers
-        chars += str(i)
-
-    for i in range (0, 30): #spaces test
-        chars += " "
-        
-    for i in range (65, 90): #capital letters
-        chars += chr(i)
-
-
     def execute(self, context):
         obj = context.active_object
         if obj.type == "FONT":
             obj.data.body = ""
-            
-            width = int(context.scene.matrixAddonConfig.amount)
-            blancRange = random.randint(0, 15) #right
-            blancRange1 = random.randint(0, 15)  #left 
-            blancRange2 = random.randint(0, 15)  #mid
-            rmLlineIndex = random.randint(0, width)
+
+            width = obj.matrixAddonConfig.amount
+            blancRange = random.randint(0, 15)  # right
+            blancRange1 = random.randint(0, 15)  # left
             leftIndex = 0
-            
-            for i in range (0, int(context.scene.characterCount.characterCount)):
-                for n in range (0, width):
+            chars = list(obj.matrixAddonConfig.charset)
+
+            for i in range(0, obj.matrixAddonConfig.char_count):
+                for n in range(0, width):
                     if n < leftIndex:
                         obj.data.body += "  "
                     else:
-                        obj.data.body += self.chars[random.randint(0, len(self.chars) - 1)]
+                        obj.data.body += chars[random.randint(0, len(chars) - 1)]
                 obj.data.body += '\n'
-                
+
                 if i >= blancRange:
                     width += random.randint(-1, 1)
                     blancRange = random.randint(0, 15) + i
-                
+
                 if i >= blancRange1:
                     leftIndex += random.randint(-1, 1)
                     blancRange1 = random.randint(0, 15) + i
-                    
-            #originalTxt.append(obj.data.body)
-            #print("Hello World")
+
+            # Store the generated text in the object's custom data
+            obj.matrixAddonData.txt = obj.data.body
+            obj.matrixAddonData.TMatrixAddon = obj.name
+            obj.matrixAddonData.offset = random.uniform(0, 1)
+
         return {'FINISHED'}
-    
-    
-    @classmethod
-    def updateFrame(self, context):
-        global txtObjs
-        global originalTxt
-        global randOffset
-        
-        freq = int(100 - context.scene.matrixAddonConfig.changeFreq)
-                
-        random.seed(bpy.context.scene.frame_current)  # current frame as the random seed
-        for n in range(0, len(txtObjs)):
-            if bpy.context.scene.frame_current % int(context.scene.characterCount.everyframe) == int(float(randOffset[n]) * float(context.scene.characterCount.everyframe)):
-                currentText = ""
-                
-                changeIndex = random.randint(0, freq)  #edit max value to edit frequency, less = more frequency of changes
-                #i = 0
-                for c in range(0, len(originalTxt[n])):
-                    
-                    if c >= changeIndex:
-                        if originalTxt[n][c] != '\n' and originalTxt[n][c] != " ":
-                            temp = MATRIX_OT_GENERATE.chars[random.randint(0, len(MATRIX_OT_GENERATE.chars) - 1)]
-                            while temp == " ":
-                                temp = MATRIX_OT_GENERATE.chars[random.randint(0, len(MATRIX_OT_GENERATE.chars) - 1)]
-                                print('here1')
-                            
-                            currentText += temp
-                        else:
-                            currentText += originalTxt[n][c]
-                        changeIndex = random.randint(0, freq) + c
-                        
-                    else:
-                        currentText += originalTxt[n][c]
-                    #i += 1       
-                txtObjs[n].data.body = currentText
-        return {'FINISHED'}
-        
-class MATRIX_OT_ClearAnim(bpy.types.Operator):
-    bl_label = "Clear Animation"
-    bl_idname = "matrix_addon.clear_anim"
-    bl_description = ""
 
-    def execute(self, context):
-        global txtObjs
-        global originalTxt
-        global randOffset
-
-        for i in range(0, len(txtObjs)):
-            try:
-                txtObjs[i].data.body = originalTxt[i]
-            except:
-                print("nah")
-        txtObjs = []
-        originalTxt = []
-        randOffset = []
-        
-        context.scene.matrixAddonData = bpy.props.CollectionProperty(type=MatrixAddonDataBlock)
-        
-        return {'FINISHED'}
-    
-
-class MATRIX_OT_ANIMATE(bpy.types.Operator):
-    bl_label = "Animate Selected"
-    bl_idname = "matrix_addon.animate"
-    bl_description = ""
-    
-    def execute(self, context):
-        self.assignSelected(context)
-        
-        return {'FINISHED'}
-    
-    def assignSelected(self, context):
-        global txtObjs
-        global originalTxt
-        global randOffset
-        temp = [ o for o in bpy.context.selected_objects if o.select_get() and o.type == "FONT" ]
-        #if len(txtObjs) == 0:
-        txtObjs = temp
-        originalTxt = []
-        randOffset = []
-
-        for i, txt in enumerate(temp):
-            originalTxt.append(txt.data.body)
-            randOffset.append(random.uniform(0, 1))     #TMatrixAddon = bpy.types.PointerProperty()     txt = bpy.types.StringProperty()   offset = bpy.types.FloatProperty()
-            if i < len(context.scene.matrixAddonData):
-                mydata = context.scene.matrixAddonData[i]
-            else:
-                mydata = context.scene.matrixAddonData.add()
-            mydata.TMatrixAddon = txt.name
-            mydata.txt = txt.data.body
-            mydata.offset = random.uniform(0, 1)
-        # clear extra entries
-        if len(context.scene.matrixAddonData) > len(temp):
-            for i in range(len(temp), len(context.scene.matrixAddonData)):
-                context.scene.matrixAddonData.remove(i)
-
-
+# Panel UI
 class MATRIX_PT_PANEL(bpy.types.Panel):
-    #Creates a Panel in the MatrixAddon properties window
-    bl_idname = "matrix_addon.panel"
-    bl_label = "Matrix generator"
+    bl_idname = "MATRIX_PT_PANEL"
+    bl_label = "Matrix Generator"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    #bl_context = "objectmode"
-    
     bl_category = "Misc"
-    
-
-    # def draw_header(self, context):
-    #     layout = self.layout
-    #     #layout.label(text="Matrix Generator")
 
     def draw(self, context):
         layout = self.layout
+        obj = context.object
 
-        #obj = context.MatrixAddon
+        if obj and obj.type == "FONT":
+            layout.label(text=f"Configuring: {obj.name}", icon='OBJECT_DATA')
+            col = layout.column()
+            
+            col.prop(obj.matrixAddonConfig, "amount")
 
-        #row = layout.row()
-        #row.label(text="Active MatrixAddon is: " + obj.type)
-        #row = layout.row()
-        #row.prop(obj, "type")
+            col.prop(obj.matrixAddonConfig, "char_count")
 
-        row = layout.row()   #line width
-        row.prop(context.scene.matrixAddonConfig, "amount")
-        
-        row = layout.row()   # amount of chars
-        row.prop(context.scene.matrixAddonConfig, "characterCount")
+            col.operator(MATRIX_OT_GENERATE.bl_idname)
 
-        row = layout.row()
-        row.operator(MATRIX_OT_GENERATE.bl_idname)
-        
-        row = layout.row()
-        row.operator(MATRIX_OT_ANIMATE.bl_idname, text="Animate Selected")
-        
-        row = layout.row()   # animate every x frames
-        row.prop(context.scene.matrixAddonConfig, "everyframe")
-        
-        row = layout.row()   # changing frequency
-        row.prop(context.scene.matrixAddonConfig, "changeFreq", slider=True)
+            col.prop(obj.matrixAddonConfig, "animated")
+            if obj.matrixAddonConfig.animated:
+                col.prop(obj.matrixAddonConfig, "every_frame")
+                col.prop(obj.matrixAddonConfig, "change_freq", slider=True)
+            
+            col.prop(obj.matrixAddonConfig, "use_custom_charset")
+            if obj.matrixAddonConfig.use_custom_charset:
+                col.prop(obj.matrixAddonConfig, "charset")
+                
 
-        row = layout.row()
-        row.operator(MATRIX_OT_ClearAnim.bl_idname, text="Restore all")
+        else:
+            layout.label(text="Select a text object to configure")
+
+
+# Operator to reset animation
+class MATRIX_OT_ClearAnim(bpy.types.Operator):
+    bl_label = "Clear Animation"
+    bl_idname = "matrix_addon.clear_anim"
     
-        if updated == False:
-            updataData()
-        
+    def execute(self, context):
+        for obj in bpy.context.scene.objects:
+            if hasattr(obj, "matrixAddonData"):
+                obj.data.body = obj.matrixAddonData.txt  # Restore original text
+        return {'FINISHED'}
+
+# Operator to assign selected objects for animation
+class MATRIX_OT_ANIMATE(bpy.types.Operator):
+    bl_label = "Animate Selected"
+    bl_idname = "matrix_addon.animate"
+
+    def execute(self, context):
+        for obj in context.selected_objects:
+            if obj.type == "FONT":
+                obj.matrixAddonData.txt = obj.data.body
+                obj.matrixAddonData.offset = random.uniform(0, 1)
+
+        return {'FINISHED'}
+
+
+# Register/Unregister Classes
 classes = (
     MatrixAddonConfig,
     MatrixAddonDataBlock,
-    MATRIX_OT_ClearAnim,
     MATRIX_OT_GENERATE,
+    MATRIX_OT_ClearAnim,
     MATRIX_OT_ANIMATE,
     MATRIX_PT_PANEL
-    )    
-
+)
 
 def register():
-    global mydata
-
     for cls in classes:
         bpy.utils.register_class(cls)
-    
-    bpy.types.Scene.matrixAddonConfig = bpy.props.PointerProperty(type=MatrixAddonConfig)
-    bpy.types.Scene.matrixAddonData = bpy.props.CollectionProperty(type=MatrixAddonDataBlock)
-    bpy.app.handlers.frame_change_post.append(MATRIX_OT_GENERATE.updateFrame)
-    #mydata = bpy.types.Scene.matrixAddonData.add()
+
+    bpy.types.Object.matrixAddonConfig = bpy.props.PointerProperty(type=MatrixAddonConfig)
+    bpy.types.Object.matrixAddonData = bpy.props.PointerProperty(type=MatrixAddonDataBlock)
+    bpy.app.handlers.frame_change_post.append(updateFrame)
+
 
 def unregister():
-    bpy.app.handlers.frame_change_post.remove(MATRIX_OT_GENERATE.updateFrame)
-    
+    bpy.app.handlers.frame_change_post.remove(updateFrame)
+
     for cls in classes:
         bpy.utils.unregister_class(cls)
 
-    del(bpy.types.Scene.matrixAddonData)
+    del bpy.types.Object.matrixAddonConfig
+    del bpy.types.Object.matrixAddonData
 
 
 if __name__ == "__main__":
-    print("registering")
     try:
         unregister()
     except:
