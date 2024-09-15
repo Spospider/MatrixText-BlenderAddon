@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Matrix Text Generator",
     "author": "Ali Eissa",
-    "version": (1, 2),
+    "version": (1, 3, 0),
     "blender": (2, 80, 0),
     "location": "View3D > Sidebar > Misc > Matrix generator",
     "description": "Tool for generating random matrix-like text",
